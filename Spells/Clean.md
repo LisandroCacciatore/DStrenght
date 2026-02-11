@@ -1,63 +1,77 @@
-function 1_procesarTorneo() {
+/**
+ * ------------------------------------------------------------------
+ * HECHIZO 1: LIMPIEZA Y CÁLCULO
+ * Pone rojos los fallos, calcula el mejor intento y suma el Total.
+ * ------------------------------------------------------------------
+ */
+function procesarTorneo() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  // Asumimos que hay encabezados, empezamos en fila 2
   const lastRow = sheet.getLastRow();
-  const dataRange = sheet.getRange(2, 1, lastRow - 1, 18); // Ajusta columnas si necesitas
+  
+  if (lastRow < 2) return; // No hay datos
+
+  // Leemos desde la fila 2 hasta la última, columna A(1) hasta R(18)
+  const dataRange = sheet.getRange(2, 1, lastRow - 1, 18); 
   const data = dataRange.getValues();
   
-  // Índices de las columnas (basado en el CSV V2.0):
-  // SQ: 8,9,10 | BP: 11,12,13 | DL: 14,15,16
+  // Índices de columnas (basado en el Array, empieza en 0)
+  // SQ: Col I,J,K (Indices 8,9,10)
+  // BP: Col L,M,N (Indices 11,12,13)
+  // DL: Col O,P,Q (Indices 14,15,16)
   const cols = { sq: [8, 9, 10], bp: [11, 12, 13], dl: [14, 15, 16] };
   
-  // Arrays para guardar colores y resultados para escribir en bloque al final (más rápido)
   let fontColors = dataRange.getFontColors();
   let totals = [];
 
   for (let i = 0; i < data.length; i++) {
     let row = data[i];
-    let bestSQ = 0, bestBP = 0, bestDL = 0;
     
-    // --- LÓGICA DE SQUAT ---
-    bestSQ = procesarMovimiento(row, cols.sq, i, fontColors);
-    
-    // --- LÓGICA DE BENCH PRESS ---
-    bestBP = procesarMovimiento(row, cols.bp, i, fontColors);
-    
-    // --- LÓGICA DE DEADLIFT ---
-    bestDL = procesarMovimiento(row, cols.dl, i, fontColors);
+    // Procesar cada movimiento usando la función auxiliar
+    let resSQ = procesarIntento(row, cols.sq, i, fontColors);
+    let resBP = procesarIntento(row, cols.bp, i, fontColors);
+    let resDL = procesarIntento(row, cols.dl, i, fontColors);
 
-    // CÁLCULO DEL TOTAL (Regla: Si fallas los 3 de un tipo, Total = 0)
+    // Obtener los mejores levantamientos validos
+    let bestSQ = resSQ.max; 
+    let bestBP = resBP.max;
+    let bestDL = resDL.max;
+
+    // Calcular Total:
+    // Opción estricta: Si te blanqueas en uno (bombed=true), el total es 0.
     let total = 0;
-    if (bestSQ > 0 && bestBP > 0 && bestDL > 0) {
+    if (!resSQ.bombed && !resBP.bombed && !resDL.bombed) {
       total = bestSQ + bestBP + bestDL;
     }
     totals.push([total]);
   }
 
-  // Escribir colores y totales de una sola vez
+  // Aplicar colores y escribir totales
   dataRange.setFontColors(fontColors);
-  
-  // Asumimos que la columna 18 (R) será para el TOTAL
-  sheet.getRange(2, 18, totals.length, 1).setValues(totals);
-  sheet.getRange(1, 18).setValue("TOTAL (kg)"); // Poner título
+  sheet.getRange(2, 18, totals.length, 1).setValues(totals); // Columna 18 es R
+  sheet.getRange(1, 18).setValue("TOTAL (kg)").setFontWeight("bold");
 }
 
-// Función auxiliar para no repetir código
-function procesarMovimiento(row, indices, rowIndex, colorMatrix) {
+/**
+ * Función auxiliar para colorear celdas y buscar el máximo válido.
+ * Retorna objeto { max: numero, bombed: boolean }
+ */
+function procesarIntento(row, indices, rowIndex, colorMatrix) {
   let maxLift = 0;
-  let bombedOut = true; // Asumimos que falló todo hasta demostrar lo contrario
+  let validCount = 0;
 
   indices.forEach(colIndex => {
     let val = row[colIndex];
     if (val < 0) {
-      colorMatrix[rowIndex][colIndex] = "#FF0000"; // Rojo fallido
+      colorMatrix[rowIndex][colIndex] = "#FF0000"; // Rojo fallo
     } else if (val > 0) {
       colorMatrix[rowIndex][colIndex] = "#2E8B57"; // Verde válido
       maxLift = Math.max(maxLift, val);
-      bombedOut = false;
+      validCount++;
     }
-    // Si es 0 o vacío, lo dejamos negro
+    // Si es 0 o vacío se ignora
   });
 
-  return bombedOut ? 0 : maxLift;
+  // 'bombed' es true si intentó levantar (hay datos en el 1er intento) pero no metió ninguno válido
+  let hasData = (row[indices[0]] !== "" && row[indices[0]] !== undefined);
+  return { max: maxLift, bombed: (hasData && validCount === 0) }; 
 }
